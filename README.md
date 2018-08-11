@@ -12,7 +12,7 @@ Though it is trivial to build and install the program without it, a Makefile is 
 
 If not supplied with any arguments the program will read from standard input and write to standard output.
 
-`fucked-up [-c CODE | -f INPUT_FILE] [-g] [-o OUTPUT_FILE]
+`fucked-up [-c CODE | -f INPUT_FILE] [-g] [-o OUTPUT_FILE]`
 
 
 `-c` - Read code from following argument
