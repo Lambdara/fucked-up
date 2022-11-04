@@ -23,6 +23,16 @@ If not supplied with any arguments the program will read from standard input and
 
 `-o` - Write to specified file
 
+So an example of how to use the program would be:
+
+`./fucked-up -f tests/helloworld.bf`
+
+Or if you wish to create an executable:
+
+`./fucked-up -f tests/helloworld.bf -g -o helloworld`
+
+`chmod +x helloworld`
+
 ## Licensing
 
 This project is licensed under the GNU General Public License, version 3. The exact text of this license can be found in the 'LICENSE' file.
