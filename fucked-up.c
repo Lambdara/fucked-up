@@ -20,6 +20,7 @@
 #include <sysexits.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <sys/stat.h>
 
 // Error codes
 enum {
@@ -618,6 +619,10 @@ int main(int argc, char *argv[])
 
     // Close output
     fclose(output_file);
+
+    // If the goal was to make an executable file, chmod it
+    if (goal == GOAL_GCC && output_mode == WRITE_FILE)
+        chmod (output_arg, 0775);
 
     // Error if something went wrong
     switch(status) {
