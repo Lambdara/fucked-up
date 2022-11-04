@@ -29,8 +29,6 @@ enum {
     STATUS_UNBALANCED_LOOP,
     STATUS_LOOP_END_BEFORE_START,
     STATUS_NO_INPUT,
-    // Running
-    STATUS_CANNOT_REACH_GCC,
 };
 
 // Instructions
@@ -58,8 +56,7 @@ enum {
 // Goals
 enum {
     GOAL_EVAL,
-    GOAL_GCC,
-    GOAL_LLVM, // TODO
+    GOAL_EXECUTABLE,
 };
 
 // Container for all the program data
@@ -332,158 +329,8 @@ int bf_data_run (bf_data_t *bf_data, FILE * output_file)
     return STATUS_OK;
 }
 
-// For passing code through other compilers
-FILE ** p2open (const char *cmd, FILE **fpbuf)
-{
-    int ERROR = -1;
-    FILE  ** result = NULL;
-    int fd1[2], fd2[2];
-    int ispipe1 = ERROR, ispipe2 = ERROR;
-    pid_t pid;
-
-    // Open fd1 for reading from and fd2 for writing to
-    if((ispipe1 = pipe(fd1)) == -1 || (ispipe2 = pipe(fd2)) == -1) {
-        return NULL;
-    }
-
-    if ((pid = fork())) {
-        // Parent
-        if((fpbuf[0] = fdopen(fd1[0],"r")) == NULL ||
-           (fpbuf[1] = fdopen(fd2[1],"w")) == NULL) {
-            result = NULL;
-        } else {
-            result = fpbuf;
-        }
-    } else {
-        // Child
-        dup2(fd2[0],0);
-        dup2(fd1[1],1);
-        close(fd1[0]);
-        close(fd1[1]);
-        close(fd2[0]);
-        close(fd2[1]);
-        execlp("/bin/sh","sh","-c",cmd,NULL);
-    }
-
-    // Check for problems
-    if (ispipe1 != ERROR) {
-        close(fd1[1]);
-        if(!result) {
-            close(fd1[0]);
-        }
-    }
-    if (ispipe2 != ERROR) {
-        close(fd2[0]);
-        if(!result) {
-            close(fd2[1]);
-        }
-    }
-    return result;
-}
-
-int bf_data_through_gcc (bf_data_t *bf_data, FILE * output_file)
-{
-    FILE *gcc[2];
-
-    int c;
-
-    // Open pipes in and out of GCC
-    if(p2open("gcc -O3 -xc -o /dev/stdout -",gcc) != NULL) {
-
-        // Write to GCC
-
-        int insptr;
-
-        fprintf(gcc[1],
-                // Includes
-                "#include <stdlib.h>\n"
-                "#include <stdio.h>\n"
-
-                // Global variables for memory management
-                "int* memory;"
-                "int memsize=1, memptr=0;"
-
-                // Function for dynamic memory allocation
-                "void memfix(){"
-                "    if(memptr < memsize) return;"
-                "    int oldsize=memsize;"
-                "    while(memptr >= memsize){"
-                "        memsize *= 2;"
-                "    };"
-                "    int * newmem = calloc(memsize,sizeof(int));"
-                "    int i;"
-                "    for(i=0;i<oldsize;i++){"
-                "        newmem[i]=memory[i];"
-                "    }"
-                "    free(memory);memory=newmem;"
-                "}"
-
-                // Open main
-                "int main(void) {"
-                "    memory = calloc(memsize,sizeof(int));");
-
-        // Generate the actual instructions
-        for (insptr = 0;
-             bf_data->instructions[insptr] != BF_UNDEFINED;
-             insptr++) {
-            switch (bf_data->instructions[insptr]) {
-            case BF_INC:
-                insptr++;
-                fprintf(gcc[1],"memory[memptr] += %i;\n",
-                        bf_data->instructions[insptr]);
-                break;
-            case BF_DEC:
-                insptr++;
-                fprintf(gcc[1],"memory[memptr] -= %i;\n",
-                        bf_data->instructions[insptr]);
-                break;
-            case BF_GET:
-                fprintf(gcc[1],"memory[memptr] = getchar();\n");
-                break;
-            case BF_PUT:
-                fprintf(gcc[1],"putchar(memory[memptr]);\n");
-                break;
-            case BF_NEXT:
-                insptr++;
-                fprintf(gcc[1],"memptr += %i;\n",
-                        bf_data->instructions[insptr]);
-                // memfix is called to make sure the memory is still big enough
-                fprintf(gcc[1],"memfix();");
-                break;
-            case BF_PREV:
-                insptr++;
-                fprintf(gcc[1],"memptr -= %i;\n",
-                        bf_data->instructions[insptr]);
-                break;
-            case BF_LOOP_START:
-                insptr++;
-                fprintf(gcc[1],"while(memory[memptr]!=0){\n");
-                break;
-            case BF_LOOP_END:
-                insptr++;
-                fprintf(gcc[1],"}\n");
-                break;
-            }
-        }
-
-        // Now close main
-        fprintf(gcc[1],"}\n");
-
-        // Close input
-        fclose(gcc[1]);
-
-        // Read from GCC
-        while((c = fgetc(gcc[0])) != EOF) {
-            fputc(c, output_file);
-        }
-
-        // Close output
-        fclose(gcc[0]);
-
-        return STATUS_OK;
-    } else {
-        return STATUS_CANNOT_REACH_GCC;
-    }
+int bf_data_create_executable(bf_data_t *bf_data, FILE *output_file) {
+    exit(EX_UNAVAILABLE);
 }
 
 int main(int argc, char *argv[])
@@ -499,7 +346,7 @@ int main(int argc, char *argv[])
 
     // Argument parsing
     int c;
-    while ((c = getopt (argc, argv, "c:f:gho:")) != -1) {
+    while ((c = getopt (argc, argv, "c:f:eho:")) != -1) {
         switch (c) {
         case 'c':
             input_mode = READ_ARG;
@@ -509,15 +356,15 @@ int main(int argc, char *argv[])
             input_mode = READ_FILE;
             input_arg = optarg;
             break;
-        case 'g':
-            goal = GOAL_GCC;
+        case 'e':
+            goal = GOAL_EXECUTABLE;
             break;
         case 'h':
             fputs("Usage:\n\n",stderr);
             fputs("fucked-up [-c CODE | -f INPUT_FILE] [-g] [-o OUTPUT_FILE]\n\n",stderr);
             fputs("-c  Read code from following argument\n",stderr);
             fputs("-f  Read code from specified file\n",stderr);
-            fputs("-g  Compile using GCC, using C as intermediate language\n",stderr);
+            fputs("-e  Create an executable\n",stderr);
             fputs("-o  Write to specified file\n",stderr);
             exit(EX_USAGE);
             break;
@@ -610,9 +457,9 @@ int main(int argc, char *argv[])
         // Run the program
         status = bf_data_run (&bf_data, output_file);
         break;
-    case GOAL_GCC:
-        // Compile with GCC
-        status = bf_data_through_gcc (&bf_data, output_file);
+    case GOAL_EXECUTABLE:
+        // Create an executable
+        status = bf_data_create_executable(&bf_data, output_file);
         break;
     }
 
@@ -621,10 +468,6 @@ int main(int argc, char *argv[])
 
     // Error if something went wrong
     switch(status) {
-    case STATUS_CANNOT_REACH_GCC:
-        perror("Could not reach GCC");
-        exit(EX_SOFTWARE);
-        break;
     case STATUS_OK:
         // No problem
         break;
