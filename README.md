@@ -31,8 +31,6 @@ Or if you wish to create an executable:
 
 `./fucked-up -f tests/helloworld.bf -g -o helloworld`
 
-`chmod +x helloworld`
-
 ## Licensing
 
 This project is licensed under the GNU General Public License, version 3. The exact text of this license can be found in the 'LICENSE' file.
