@@ -106,6 +106,9 @@ int bf_data_from_file (bf_data_t * bf_data, FILE *file)
     char c;
     int instruction;
     while ((c = fgetc(file)) != EOF){
+        // We do not know how many instructions will be read
+        // When instruction space too small, just double it
+        // Amortized this is still O(n) time lost for n instructions
         while (i >= inssize - 1){
             int *new_instructions = calloc(inssize*2,sizeof(int));
             int i;
