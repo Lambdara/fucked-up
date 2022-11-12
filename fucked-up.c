@@ -280,15 +280,20 @@ int bf_data_run (bf_data_t *bf_data, FILE * output_file)
 
     while(bf_data->instructions[insptr] != BF_UNDEFINED){
 
+        // When the program being evaluated points to memory that is unallocated,
+        // allocate more memory.
         while (memptr >= memmax){
-            int *newmemory = calloc(memmax*2,sizeof(int));
-            int i;
-            for (i=0; i < memmax; i++){
-                newmemory[i] = memory[i];
-            }
-            free(memory);
-            memory = newmemory;
-            memmax *= 2;
+            // The new memory will be twice as big, this keeps the execution of
+            // BF_NEXT O(1) amortized.
+            int new_memmax = memmax*2;
+            memory = realloc(memory, new_memmax * sizeof(int)); // Preserves old content
+
+            // Initialize the extra memory to 0
+            for (int i = memmax; i < new_memmax; i++)
+                memory[i] = 0;
+
+            // Update current maximum
+            memmax = new_memmax;
         }
 
         switch(bf_data->instructions[insptr]){
