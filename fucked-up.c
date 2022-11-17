@@ -266,6 +266,21 @@ void compress (bf_data_t *bf_data)
     bf_data->instructions = compressed;
 }
 
+void reallocate_runtime_memory(int **memory, size_t *memmax, size_t memptr) {
+    int new_memmax = *memmax;
+    while (memptr >= new_memmax)
+        new_memmax *=2;
+
+    *memory = realloc(*memory, new_memmax * sizeof(int)); // Preserves old content
+
+    // Initialize the extra memory to 0
+    for (int i = *memmax; i < new_memmax; i++)
+        (*memory)[i] = 0;
+
+    // Update current maximum
+    *memmax = new_memmax;
+}
+
 // Runs the program contained in a bf_data_t
 int bf_data_run (bf_data_t *bf_data, FILE * output_file)
 {
@@ -279,23 +294,6 @@ int bf_data_run (bf_data_t *bf_data, FILE * output_file)
     int *memory = calloc(memmax,sizeof(int));
 
     while(bf_data->instructions[insptr] != BF_UNDEFINED){
-
-        // When the program being evaluated points to memory that is unallocated,
-        // allocate more memory.
-        while (memptr >= memmax){
-            // The new memory will be twice as big, this keeps the execution of
-            // BF_NEXT O(1) amortized.
-            int new_memmax = memmax*2;
-            memory = realloc(memory, new_memmax * sizeof(int)); // Preserves old content
-
-            // Initialize the extra memory to 0
-            for (int i = memmax; i < new_memmax; i++)
-                memory[i] = 0;
-
-            // Update current maximum
-            memmax = new_memmax;
-        }
-
         switch(bf_data->instructions[insptr]){
         case BF_INC:
             insptr++;
@@ -308,6 +306,8 @@ int bf_data_run (bf_data_t *bf_data, FILE * output_file)
         case BF_NEXT:
             insptr++;
             memptr += bf_data->instructions[insptr];
+            if (memptr >= memmax)
+                reallocate_runtime_memory(&memory, &memmax, memptr);
             break;
         case BF_PREV:
             insptr++;
