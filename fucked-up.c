@@ -110,14 +110,11 @@ int bf_data_from_file (bf_data_t * bf_data, FILE *file)
         // When instruction space too small, just double it
         // Amortized this is still O(n) time lost for n instructions
         while (i >= inssize - 1){
-            int *new_instructions = calloc(inssize*2,sizeof(int));
-            int i;
-            for (i=0; i < inssize; i++){
-                new_instructions[i] = instructions[i];
-            }
-            free(instructions);
-            instructions = new_instructions;
-            inssize *= 2;
+            int new_inssize = inssize * 2;
+            instructions = realloc(instructions, new_inssize * sizeof(int));
+            for (int i = inssize; i < new_inssize; i++)
+                instructions[i] = BF_UNDEFINED;
+            inssize = new_inssize;
         }
 
         if((instruction = bf_instruction(c)) != BF_UNDEFINED){
