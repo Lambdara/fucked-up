@@ -1,4 +1,4 @@
-/* Copyright (C) 2017-2022 Lambdara
+/* Copyright (C) 2017-2024 Lambdara
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -32,6 +32,8 @@ enum {
     STATUS_NO_INPUT,
     // Running
     STATUS_CANNOT_REACH_GCC,
+    // Temporary file
+    STATUS_CANNOT_CREATE_TEMP_FILE,
 };
 
 // Instructions
@@ -338,69 +340,25 @@ int bf_data_run (bf_data_t *bf_data, FILE * output_file)
     return STATUS_OK;
 }
 
-// For passing code through other compilers
-FILE ** p2open (const char *cmd, FILE **fpbuf)
+
+int bf_data_through_gcc (bf_data_t *bf_data, char *output_filename)
 {
-    int ERROR = -1;
-    FILE  ** result = NULL;
-    int fd1[2], fd2[2];
-    int ispipe1 = ERROR, ispipe2 = ERROR;
-    pid_t pid;
+    char intermediate_filename[] = "/tmp/XXXXXX.c";
+    int mkstemps_error = mkstemps(intermediate_filename, 2);
 
-    // Open fd1 for reading from and fd2 for writing to
-    if((ispipe1 = pipe(fd1)) == -1 || (ispipe2 = pipe(fd2)) == -1) {
-        return NULL;
-    }
-
-    if ((pid = fork())) {
-        // Parent
-        if((fpbuf[0] = fdopen(fd1[0],"r")) == NULL ||
-           (fpbuf[1] = fdopen(fd2[1],"w")) == NULL) {
-            result = NULL;
-        } else {
-            result = fpbuf;
-        }
-    } else {
-        // Child
-        dup2(fd2[0],0);
-        dup2(fd1[1],1);
-        close(fd1[0]);
-        close(fd1[1]);
-        close(fd2[0]);
-        close(fd2[1]);
-        execlp("/bin/sh","sh","-c",cmd,NULL);
-    }
-
-    // Check for problems
-    if (ispipe1 != ERROR) {
-        close(fd1[1]);
-        if(!result) {
-            close(fd1[0]);
-        }
-    }
-    if (ispipe2 != ERROR) {
-        close(fd2[0]);
-        if(!result) {
-            close(fd2[1]);
-        }
-    }
-    return result;
-}
-
-int bf_data_through_gcc (bf_data_t *bf_data, FILE * output_file)
-{
-    FILE *gcc[2];
-
-    int c;
+    if (mkstemps_error == -1)
+        return STATUS_CANNOT_CREATE_TEMP_FILE;
+    
+    FILE *intermediate = fopen(intermediate_filename, "w");
 
     // Open pipes in and out of GCC
-    if(p2open("gcc -O3 -xc -o /dev/stdout -",gcc) != NULL) {
+    if(intermediate != NULL) {
 
         // Write to GCC
-
+        
         int insptr;
 
-        fprintf(gcc[1],
+        fprintf(intermediate,
                 // Includes
                 "#include <stdlib.h>\n"
                 "#include <stdio.h>\n"
@@ -435,56 +393,54 @@ int bf_data_through_gcc (bf_data_t *bf_data, FILE * output_file)
             switch (bf_data->instructions[insptr]) {
             case BF_INC:
                 insptr++;
-                fprintf(gcc[1],"memory[memptr] += %i;\n",
+                fprintf(intermediate,"memory[memptr] += %i;\n",
                         bf_data->instructions[insptr]);
                 break;
             case BF_DEC:
                 insptr++;
-                fprintf(gcc[1],"memory[memptr] -= %i;\n",
+                fprintf(intermediate,"memory[memptr] -= %i;\n",
                         bf_data->instructions[insptr]);
                 break;
             case BF_GET:
-                fprintf(gcc[1],"memory[memptr] = getchar();\n");
+                fprintf(intermediate,"memory[memptr] = getchar();\n");
                 break;
             case BF_PUT:
-                fprintf(gcc[1],"putchar(memory[memptr]);\n");
+                fprintf(intermediate,"putchar(memory[memptr]);\n");
                 break;
             case BF_NEXT:
                 insptr++;
-                fprintf(gcc[1],"memptr += %i;\n",
+                fprintf(intermediate,"memptr += %i;\n",
                         bf_data->instructions[insptr]);
                 // memfix is called to make sure the memory is still big enough
-                fprintf(gcc[1],"memfix();");
+                fprintf(intermediate,"memfix();");
                 break;
             case BF_PREV:
                 insptr++;
-                fprintf(gcc[1],"memptr -= %i;\n",
+                fprintf(intermediate,"memptr -= %i;\n",
                         bf_data->instructions[insptr]);
                 break;
             case BF_LOOP_START:
                 insptr++;
-                fprintf(gcc[1],"while(memory[memptr]!=0){\n");
+                fprintf(intermediate,"while(memory[memptr]!=0){\n");
                 break;
             case BF_LOOP_END:
                 insptr++;
-                fprintf(gcc[1],"}\n");
+                fprintf(intermediate,"}\n");
                 break;
             }
         }
 
         // Now close main
-        fprintf(gcc[1],"}\n");
+        fprintf(intermediate,"}\n");
+        
+        // Close intermediate file
+        fclose(intermediate);
 
-        // Close input
-        fclose(gcc[1]);
+        // Run gcc on intermediate file
+        execl("/usr/bin/gcc", "gcc", intermediate_filename, "-o", output_filename, NULL); // TODO error handling
 
-        // Read from GCC
-        while((c = fgetc(gcc[0])) != EOF) {
-            fputc(c, output_file);
-        }
-
-        // Close output
-        fclose(gcc[0]);
+        // Remove the intermediate file
+        remove(intermediate_filename);
 
         return STATUS_OK;
     } else {
@@ -567,10 +523,14 @@ int main(int argc, char *argv[])
 
     switch(output_mode) {
     case WRITE_FILE:
-        output_file = fopen(output_arg, "w");
-        if (output_file == NULL) {
-            perror("Could not read output file");
-            exit(EX_CANTCREAT);
+        if (goal != GOAL_GCC){
+            output_file = fopen(output_arg, "w");
+            if (output_file == NULL) {
+                perror("Could not read output file");
+                exit(EX_CANTCREAT);
+            }
+        } else {
+            output_file = stdout;
         }
         break;
     case WRITE_STDOUT:
@@ -618,7 +578,7 @@ int main(int argc, char *argv[])
         break;
     case GOAL_GCC:
         // Compile with GCC
-        status = bf_data_through_gcc (&bf_data, output_file);
+        status = bf_data_through_gcc (&bf_data, output_arg);
         break;
     }
 
