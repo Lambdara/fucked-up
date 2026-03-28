@@ -16,10 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <sysexits.h>
 #include <unistd.h>
-#include <ctype.h>
 #include <sys/stat.h>
 
 // Error codes
@@ -62,7 +60,6 @@ enum {
 enum {
     GOAL_EVAL,
     GOAL_GCC,
-    GOAL_LLVM, // TODO
 };
 
 // Container for all the program data
@@ -99,8 +96,8 @@ int bf_instruction(char c)
 int bf_data_from_file (bf_data_t * bf_data, FILE *file)
 {
     // Size of, and instruction space itself.
-    int inssize = 2;
-    int * instructions = calloc(inssize,sizeof(int));
+    int instructions_size = 2;
+    int * instructions = calloc(instructions_size,sizeof(int));
 
     int i = 0; // Needed inssize
     int balance = 0; // Keeps track of BF_LOOP_START and BF_LOOP_END balance
@@ -111,12 +108,12 @@ int bf_data_from_file (bf_data_t * bf_data, FILE *file)
         // We do not know how many instructions will be read
         // When instruction space too small, just double it
         // Amortized this is still O(n) time lost for n instructions
-        while (i >= inssize - 1){
-            int new_inssize = inssize * 2;
-            instructions = realloc(instructions, new_inssize * sizeof(int));
-            for (int i = inssize; i < new_inssize; i++)
+        while (i >= instructions_size - 1){
+            int new_instructions_size = instructions_size * 2;
+            instructions = realloc(instructions, new_instructions_size * sizeof(int));
+            for (int i = instructions_size; i < new_instructions_size; i++)
                 instructions[i] = BF_UNDEFINED;
-            inssize = new_inssize;
+            instructions_size = new_instructions_size;
         }
 
         if((instruction = bf_instruction(c)) != BF_UNDEFINED){
@@ -265,73 +262,73 @@ void compress (bf_data_t *bf_data)
     bf_data->instructions = compressed;
 }
 
-void reallocate_runtime_memory(int **memory, size_t *memmax, size_t memptr) {
-    int new_memmax = *memmax;
-    while (memptr >= new_memmax)
-        new_memmax *=2;
+void reallocate_runtime_memory(int **memory, size_t *memory_maximum, size_t memory_pointer) {
+    int new_memory_maximum = *memory_maximum;
+    while (memory_pointer >= new_memory_maximum)
+        new_memory_maximum *=2;
 
-    *memory = realloc(*memory, new_memmax * sizeof(int)); // Preserves old content
+    *memory = realloc(*memory, new_memory_maximum * sizeof(int)); // Preserves old content
 
     // Initialize the extra memory to 0
-    for (int i = *memmax; i < new_memmax; i++)
+    for (int i = *memory_maximum; i < new_memory_maximum; i++)
         (*memory)[i] = 0;
 
     // Update current maximum
-    *memmax = new_memmax;
+    *memory_maximum = new_memory_maximum;
 }
 
 // Runs the program contained in a bf_data_t
-int bf_data_run (bf_data_t *bf_data, FILE * output_file)
+int bf_data_run (const bf_data_t *bf_data, FILE * output_file)
 {
     // Current place in instruction space
-    size_t insptr = 0;
+    size_t instruction_pointer = 0;
 
     // Maximum and current index in memory space
-    size_t memmax = 1;
-    size_t memptr = 0;
+    size_t memory_count = 1;
+    size_t memory_pointer = 0;
 
-    int *memory = calloc(memmax,sizeof(int));
+    int *memory = calloc(memory_count,sizeof(int));
 
-    while(bf_data->instructions[insptr] != BF_UNDEFINED){
-        switch(bf_data->instructions[insptr]){
+    while(bf_data->instructions[instruction_pointer] != BF_UNDEFINED){
+        switch(bf_data->instructions[instruction_pointer]){
         case BF_INC:
-            insptr++;
-            memory[memptr] += bf_data->instructions[insptr];
+            instruction_pointer++;
+            memory[memory_pointer] += bf_data->instructions[instruction_pointer];
             break;
         case BF_DEC:
-            insptr++;
-            memory[memptr] -= bf_data->instructions[insptr];
+            instruction_pointer++;
+            memory[memory_pointer] -= bf_data->instructions[instruction_pointer];
             break;
         case BF_NEXT:
-            insptr++;
-            memptr += bf_data->instructions[insptr];
-            if (memptr >= memmax)
-                reallocate_runtime_memory(&memory, &memmax, memptr);
+            instruction_pointer++;
+            memory_pointer += bf_data->instructions[instruction_pointer];
+            if (memory_pointer >= memory_count)
+                reallocate_runtime_memory(&memory, &memory_count, memory_pointer);
             break;
         case BF_PREV:
-            insptr++;
-            memptr -= bf_data->instructions[insptr];
+            instruction_pointer++;
+            memory_pointer -= bf_data->instructions[instruction_pointer];
             break;
         case BF_LOOP_START:
-            insptr++;
-            if (memory[memptr] == 0){
-                insptr = bf_data->instructions[insptr] + 1;
+            instruction_pointer++;
+            if (memory[memory_pointer] == 0){
+                instruction_pointer = bf_data->instructions[instruction_pointer] + 1;
             }
             break;
         case BF_LOOP_END:
-            insptr++;
-            if (memory[memptr] != 0){
-                insptr = bf_data->instructions[insptr] + 1;
+            instruction_pointer++;
+            if (memory[memory_pointer] != 0){
+                instruction_pointer = bf_data->instructions[instruction_pointer] + 1;
             }
             break;
         case BF_PUT:
-            fputc(memory[memptr],output_file);
+            fputc(memory[memory_pointer],output_file);
             break;
         case BF_GET:
-            memory[memptr] = getchar();
+            memory[memory_pointer] = getchar();
             break;
         }
-        insptr++;
+        instruction_pointer++;
     }
 
     // Free the memory
@@ -355,8 +352,6 @@ int bf_data_through_gcc (bf_data_t *bf_data, char *output_filename)
     if(intermediate != NULL) {
 
         // Write to GCC
-        
-        int insptr;
 
         fprintf(intermediate,
                 // Includes
@@ -387,19 +382,19 @@ int bf_data_through_gcc (bf_data_t *bf_data, char *output_filename)
                 "    memory = calloc(memsize,sizeof(int));");
 
         // Generate the actual instructions
-        for (insptr = 0;
-             bf_data->instructions[insptr] != BF_UNDEFINED;
-             insptr++) {
-            switch (bf_data->instructions[insptr]) {
+        for (int instruction_pointer = 0;
+             bf_data->instructions[instruction_pointer] != BF_UNDEFINED;
+             instruction_pointer++) {
+            switch (bf_data->instructions[instruction_pointer]) {
             case BF_INC:
-                insptr++;
+                instruction_pointer++;
                 fprintf(intermediate,"memory[memptr] += %i;\n",
-                        bf_data->instructions[insptr]);
+                        bf_data->instructions[instruction_pointer]);
                 break;
             case BF_DEC:
-                insptr++;
+                instruction_pointer++;
                 fprintf(intermediate,"memory[memptr] -= %i;\n",
-                        bf_data->instructions[insptr]);
+                        bf_data->instructions[instruction_pointer]);
                 break;
             case BF_GET:
                 fprintf(intermediate,"memory[memptr] = getchar();\n");
@@ -408,23 +403,23 @@ int bf_data_through_gcc (bf_data_t *bf_data, char *output_filename)
                 fprintf(intermediate,"putchar(memory[memptr]);\n");
                 break;
             case BF_NEXT:
-                insptr++;
+                instruction_pointer++;
                 fprintf(intermediate,"memptr += %i;\n",
-                        bf_data->instructions[insptr]);
+                        bf_data->instructions[instruction_pointer]);
                 // memfix is called to make sure the memory is still big enough
                 fprintf(intermediate,"memfix();");
                 break;
             case BF_PREV:
-                insptr++;
+                instruction_pointer++;
                 fprintf(intermediate,"memptr -= %i;\n",
-                        bf_data->instructions[insptr]);
+                        bf_data->instructions[instruction_pointer]);
                 break;
             case BF_LOOP_START:
-                insptr++;
+                instruction_pointer++;
                 fprintf(intermediate,"while(memory[memptr]!=0){\n");
                 break;
             case BF_LOOP_END:
-                insptr++;
+                instruction_pointer++;
                 fprintf(intermediate,"}\n");
                 break;
             }
@@ -448,7 +443,7 @@ int bf_data_through_gcc (bf_data_t *bf_data, char *output_filename)
     }
 }
 
-int main(int argc, char *argv[])
+int main(const int argc, char *argv[])
 {
     /* How to read input, where to give output, and what to do */
     int input_mode = READ_STDIN;
@@ -516,9 +511,6 @@ int main(int argc, char *argv[])
     case READ_STDIN:
         input_file = stdin;
         break;
-    default:
-        fprintf(stderr, "Internal error, no `input_mode`");
-        exit(EX_SOFTWARE);
     }
 
     switch(output_mode) {
@@ -536,36 +528,11 @@ int main(int argc, char *argv[])
     case WRITE_STDOUT:
         output_file = stdout;
         break;
-    default:
-        fprintf(stderr, "Internal error, no `output_mode`");
-        exit(EX_SOFTWARE);
     }
 
     // Read data from file and close
     bf_data_from_file(&bf_data,input_file);
     fclose(input_file);
-
-    // Error if something went wrong
-    switch (status){
-    case STATUS_UNBALANCED_LOOP:
-        fputs("BF_LOOP_START and BF_LOOP_END were not balanced\n",stderr);
-        exit(EX_DATAERR);
-        break;
-    case STATUS_LOOP_END_BEFORE_START:
-        fputs("Encountered BF_LOOP_END before matching BF_LOOP_START\n",stderr);
-        exit(EX_DATAERR);
-        break;
-    case STATUS_NO_INPUT:
-        fputs("Could not read from input\n",stderr);
-        exit(EX_NOINPUT);
-        break;
-    case STATUS_OK:
-        // No problem
-        break;
-    default:
-        fprintf(stderr, "Unknown error parsing input file %s\n", argv[1]);
-        exit(EX_SOFTWARE);
-    }
 
     // Compress the program
     compress(&bf_data);

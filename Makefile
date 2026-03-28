@@ -11,3 +11,5 @@ tests: fucked-up
 	./fucked-up -f tests/helloworld.bf | diff tests/helloworld.result -
 	./fucked-up -f tests/fizzbuzz.bf | diff tests/fizzbuzz.result -
 	./fucked-up -f tests/mandelbrot.bf | diff tests/mandelbrot.result -
+
+all: fucked-up
