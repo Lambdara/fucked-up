@@ -30,6 +30,8 @@ enum {
     STATUS_NO_INPUT,
     // Running
     STATUS_CANNOT_REACH_GCC,
+    // Error in user code
+    STATUS_MEMORY_POINTER_BELOW_ZERO,
     // Temporary file
     STATUS_CANNOT_CREATE_TEMP_FILE,
 };
@@ -280,6 +282,9 @@ void reallocate_runtime_memory(int **memory, size_t *memory_maximum, size_t memo
 // Runs the program contained in a bf_data_t
 int bf_data_run (const bf_data_t *bf_data, FILE * output_file)
 {
+    // Status is OK until something goes wrong
+    int status = STATUS_OK;
+
     // Current place in instruction space
     size_t instruction_pointer = 0;
 
@@ -307,6 +312,10 @@ int bf_data_run (const bf_data_t *bf_data, FILE * output_file)
             break;
         case BF_PREV:
             instruction_pointer++;
+            if (memory_pointer == 0) {
+                status = STATUS_MEMORY_POINTER_BELOW_ZERO;
+                goto free_memory_and_exit;
+            }
             memory_pointer -= bf_data->instructions[instruction_pointer];
             break;
         case BF_LOOP_START:
@@ -331,10 +340,12 @@ int bf_data_run (const bf_data_t *bf_data, FILE * output_file)
         instruction_pointer++;
     }
 
+    free_memory_and_exit:
+
     // Free the memory
     free(memory);
 
-    return STATUS_OK;
+    return status;
 }
 
 
@@ -562,6 +573,8 @@ int main(const int argc, char *argv[])
         perror("Could not reach GCC");
         exit(EX_SOFTWARE);
         break;
+    case STATUS_MEMORY_POINTER_BELOW_ZERO:
+        perror("Memory pointer below zero");
     case STATUS_OK:
         // No problem
         break;
